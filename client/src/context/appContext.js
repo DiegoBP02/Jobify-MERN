@@ -28,12 +28,11 @@ import {
   CLEAR_FILTERS,
   CHANGE_PAGE,
   DELETE_JOB_ERROR,
+  GET_CURRENT_USER_BEGIN,
+  GET_CURRENT_USER_SUCCESS,
 } from "./actions";
 import axios from "axios";
-
-const token = localStorage.getItem("token");
-const user = localStorage.getItem("user");
-const location = localStorage.getItem("location");
+import { useEffect } from "react";
 
 const initialState = {
   // user
@@ -41,10 +40,9 @@ const initialState = {
   showAlert: false,
   alertText: "",
   alertType: "",
-  user: user ? JSON.parse(user) : null,
-  token: token,
-  userLocation: location || "",
-  jobLocation: location || "",
+  user: null,
+  userLocation: "",
+  jobLocation: "",
   showSidebar: false,
   // jobs
   isEditing: false,
@@ -69,6 +67,8 @@ const initialState = {
   searchType: "all",
   sort: "latest",
   sortOptions: ["latest", "oldest", "a-z", "z-a"],
+  // cookies
+  userLoading: true,
 };
 
 const AppContext = React.createContext();
@@ -79,15 +79,6 @@ const AppProvider = ({ children }) => {
     baseURL: "/api/v1",
   });
 
-  authFetch.interceptors.request.use(
-    (config) => {
-      config.headers["Authorization"] = `Bearer ${state.token}`;
-      return config;
-    },
-    (error) => {
-      return Promise.reject(error);
-    }
-  );
   authFetch.interceptors.response.use(
     (response) => {
       return response;
@@ -121,9 +112,9 @@ const AppProvider = ({ children }) => {
     dispatch({ type: HANDLE_CHANGE, payload: { name, value } });
   };
 
-  const logoutUser = () => {
+  const logoutUser = async () => {
+    await authFetch.get("/auth/logout");
     dispatch({ type: LOGOUT_USER });
-    removeUserFromLocalStorage({ user, token, location });
   };
   const clearValues = () => {
     dispatch({ type: CLEAR_VALUES });
@@ -188,13 +179,11 @@ const AppProvider = ({ children }) => {
     try {
       const { data } = await authFetch.patch(`/auth/updateUser`, currentUser);
 
-      // no token
       const { user, location } = data;
       dispatch({
         type: UPDATE_USER_SUCCESS,
         payload: { user, location },
       });
-      addUserToLocalStorage({ user, token, location });
     } catch (error) {
       if (error.response.status !== 401) {
         dispatch({
@@ -246,17 +235,6 @@ const AppProvider = ({ children }) => {
     clearValues();
   };
 
-  const addUserToLocalStorage = ({ user, token, location }) => {
-    localStorage.setItem("user", JSON.stringify(user));
-    localStorage.setItem("token", token);
-    localStorage.setItem("location", location);
-  };
-  const removeUserFromLocalStorage = ({ user, token, location }) => {
-    localStorage.removeItem("user");
-    localStorage.removeItem("token");
-    localStorage.removeItem("location");
-  };
-
   const setupUser = async ({ currentUser, endPoint, alertText }) => {
     dispatch({ type: SETUP_USER_BEGIN });
     try {
@@ -265,12 +243,11 @@ const AppProvider = ({ children }) => {
         currentUser
       );
 
-      const { user, token, location } = data;
+      const { user, location } = data;
       dispatch({
         type: SETUP_USER_SUCCESS,
-        payload: { user, token, location, alertText },
+        payload: { user, location, alertText },
       });
-      addUserToLocalStorage({ user, token, location });
     } catch (error) {
       dispatch({
         type: SETUP_USER_ERROR,
@@ -306,6 +283,22 @@ const AppProvider = ({ children }) => {
     dispatch({ type: CHANGE_PAGE, payload: { page } });
   };
 
+  const getCurrentUser = async () => {
+    dispatch({ type: GET_CURRENT_USER_BEGIN });
+    try {
+      const { data } = await authFetch("/auth/getCurrentUser");
+      const { user, location } = data;
+      dispatch({ type: GET_CURRENT_USER_SUCCESS, payload: { user, location } });
+    } catch (error) {
+      if (error.response.status === 401) return;
+      logoutUser();
+    }
+  };
+
+  useEffect(() => {
+    getCurrentUser(); // eslint-disable-next-line
+  }, []);
+
   return (
     <AppContext.Provider
       value={{
@@ -326,6 +319,7 @@ const AppProvider = ({ children }) => {
         showStats,
         clearFilters,
         changePage,
+        getCurrentUser,
       }}
     >
       {children}
